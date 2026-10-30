@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Dino Run</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+  html,body{height:100%;overflow:hidden;background:#f7f7f7;font-family:system-ui,-apple-system,sans-serif;touch-action:none}
+  canvas{display:block;width:100%;height:100%}
+  #hud{position:fixed;top:env(safe-area-inset-top,8px);left:0;right:0;padding:12px 16px;display:flex;justify-content:space-between;color:#535353;font-weight:700;font-size:16px;pointer-events:none;z-index:5}
+  #hint{position:fixed;bottom:calc(env(safe-area-inset-bottom,8px) + 12px);left:0;right:0;text-align:center;color:#53535399;font-size:13px;pointer-events:none;z-index:5}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><span id="hL"></span><span id="hR"></span></div>
+<div id="hint">Тап / Пробел — прыжок</div>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const hL = document.getElementById('hL');
+const hR = document.getElementById('hR');
+
+let W = 0, H = 0;
+const DPR = Math.min(devicePixelRatio || 1, 2);
+
+// ---- состояние (объявлено ДО использования) ----
+let groundY, player, obstacles, clouds, speed, score, over, t, spawnT;
+let inited = false;
+const PX = 80, GRAV = 0.9, JUMP = -15;
+
+function getBest(){ return +localStorage.getItem('dino_best') || 0; }
+function saveBest(v){ if (v > getBest()) localStorage.setItem('dino_best', v); }
+
+function reset(){
+  groundY = H - 80;
+  player = { x: PX, y: groundY - 46, w: 34, h: 46, vy: 0 };
+  obstacles = []; clouds = [];
+  speed = 6; score = 0; over = false; t = 0; spawnT = 60;
+  for (let i = 0; i < 3; i++)
+    clouds.push({ x: Math.random() * W, y: 40 + Math.random() * 80, s: 0.5 + Math.random() * 0.5 });
+  inited = true;
+}
+
+function resize(){
+  W = innerWidth; H = innerHeight;
+  c.width = W * DPR; c.height = H * DPR;
+  c.style.width = W + 'px'; c.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (inited) reset();
+}
+
+function spawn(){
+  if (spawnT-- <= 0) {
+    spawnT = Math.max(45, 95 - Math.floor(score / 300) * 5) + Math.random() * 40;
+    const r = Math.random();
+    if (score > 500 && r < 0.35) {
+      obstacles.push({ x: W + 40, y: groundY - 70 - Math.random() * 40, w: 46, h: 30, type: 'bird' });
+    } else {
+      const h = 30 + Math.random() * 45;
+      const w = 22 + Math.random() * 18;
+      obstacles.push({ x: W + 40, y: groundY - h, w, h, type: 'cactus' });
+    }
+  }
+}
+
+function jump(){
+  if (!inited) return;
+  if (over) { reset(); return; }
+  if (player.y >= groundY - player.h - 0.5) player.vy = JUMP;
+}
+
+addEventListener('touchstart', e => { e.preventDefault(); jump(); }, { passive: false });
+addEventListener('mousedown', e => { if (e.target.tagName === 'BUTTON') return; jump(); });
+addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
+});
+
+function update(){
+  if (!inited || over) return;
+  t++; score += 0.5;
+  speed = 6 + Math.min(score / 400, 7);
+  player.vy += GRAV; player.y += player.vy;
+  const floor = groundY - player.h;
+  if (player.y >= floor) { player.y = floor; player.vy = 0; }
+  spawn();
+  obstacles.forEach(o => { o.x -= speed; if (o.type === 'bird') o.y += Math.sin(t * 0.08) * 0.6; });
+  obstacles = obstacles.filter(o => o.x + o.w > -30);
+  clouds.forEach(cl => { cl.x -= speed * cl.s * 0.3; if (cl.x < -60) { cl.x = W + 40; cl.y = 40 + Math.random() * 80; } });
+
+  for (const o of obstacles) {
+    if (player.x < o.x + o.w - 4 && player.x + player.w - 4 > o.x &&
+        player.y + 4 < o.y + o.h && player.y + player.h - 4 > o.y) {
+      over = true;
+      saveBest(Math.floor(score));
+    }
+  }
+  saveBest(Math.floor(score));
+}
+
+function draw(){
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#f7f7f7'); g.addColorStop(1, '#e0e0e0');
+ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#fff';
+  clouds.forEach(cl => {
+    ctx.beginPath(); ctx.arc(cl.x, cl.y, 18, 0, 7);
+    ctx.arc(cl.x + 18, cl.y + 4, 14, 0, 7);
+    ctx.arc(cl.x - 16, cl.y + 4, 12, 0, 7); ctx.fill();
+  });
+
+  ctx.fillStyle = '#535353'; ctx.fillRect(0, groundY, W, 2);
+  ctx.fillStyle = '#9a9a9a';
+  const off = (t * speed) % 40;
+  for (let x = -off; x < W; x += 40) ctx.fillRect(x, groundY + 8, 14, 2);
+
+  ctx.fillStyle = over ? '#999' : '#535353';
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+  ctx.fillStyle = '#fff'; ctx.fillRect(player.x + 22, player.y + 8, 5, 5);
+
+  obstacles.forEach(o => {
+    if (o.type === 'cactus') {
+      ctx.fillStyle = '#3d6b3d';
+      ctx.fillRect(o.x, o.y, o.w, o.h);
+      ctx.fillRect(o.x - 6, o.y + o.h * 0.4, 6, o.h * 0.4);
+      ctx.fillRect(o.x + o.w, o.y + o.h * 0.3, 6, o.h * 0.35);
+    } else {
+      ctx.fillStyle = '#535353';
+      ctx.beginPath(); ctx.ellipse(o.x + o.w / 2, o.y + o.h / 2, o.w / 2, o.h / 3, 0, 0, 7); ctx.fill();
+    }
+  });
+
+  hL.textContent = 'Счёт: ' + Math.floor(score);
+  hR.textContent = 'Рекорд: ' + getBest();
+
+  if (over) {
+    ctx.fillStyle = '#0007'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+    ctx.font = 'bold 34px system-ui';
+    ctx.fillText('Игра окончена', W / 2, H / 2 - 20);
+    ctx.font = '18px system-ui';
+    ctx.fillText('Тап — заново', W / 2, H / 2 + 20);
+  }
+}
+
+// ---- правильный порядок: сначала resize (обновит W,H), потом reset ----
+resize();   // inited === false → просто задаст W,H
+reset();    // теперь groundY, player и т.д. создадутся с актуальными W,H
+
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>
